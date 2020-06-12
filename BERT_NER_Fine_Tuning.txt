@@ -1,0 +1,1263 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "name": "BERT NER Fine-Tuning.ipynb",
+      "provenance": [],
+      "collapsed_sections": []
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "2BTn0oPFsHOf",
+        "colab_type": "code",
+        "outputId": "7bd11f92-7cdc-42ca-c3bf-24d0a3cf0b00",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 34
+        }
+      },
+      "source": [
+        "import tensorflow as tf\n",
+        "\n",
+        "device_name = tf.test.gpu_device_name()\n",
+        "if device_name == '/device:GPU:0':\n",
+        "    print('GPU: {}'.format(device_name))\n",
+        "else:\n",
+        "    print('No GPU. Run on Colab for faster computing!')"
+      ],
+      "execution_count": 28,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "GPU: /device:GPU:0\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "H82D8us0sPUt",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "import torch\n",
+        "\n",
+        "device = torch.device(\"cuda\" if torch.cuda.is_available() else \"cpu\")\n",
+        "n_gpu = torch.cuda.device_count()"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "c9--1I5FsSh5",
+        "colab_type": "code",
+        "outputId": "a5915735-b2a1-406e-beca-a33ad1f5fd25",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 340
+        }
+      },
+      "source": [
+        "!pip install transformers"
+      ],
+      "execution_count": 30,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Requirement already satisfied: transformers in /usr/local/lib/python3.6/dist-packages (2.11.0)\n",
+            "Requirement already satisfied: requests in /usr/local/lib/python3.6/dist-packages (from transformers) (2.23.0)\n",
+            "Requirement already satisfied: sentencepiece in /usr/local/lib/python3.6/dist-packages (from transformers) (0.1.91)\n",
+            "Requirement already satisfied: dataclasses; python_version < \"3.7\" in /usr/local/lib/python3.6/dist-packages (from transformers) (0.7)\n",
+            "Requirement already satisfied: packaging in /usr/local/lib/python3.6/dist-packages (from transformers) (20.4)\n",
+            "Requirement already satisfied: filelock in /usr/local/lib/python3.6/dist-packages (from transformers) (3.0.12)\n",
+            "Requirement already satisfied: numpy in /usr/local/lib/python3.6/dist-packages (from transformers) (1.18.5)\n",
+            "Requirement already satisfied: tqdm>=4.27 in /usr/local/lib/python3.6/dist-packages (from transformers) (4.41.1)\n",
+            "Requirement already satisfied: tokenizers==0.7.0 in /usr/local/lib/python3.6/dist-packages (from transformers) (0.7.0)\n",
+            "Requirement already satisfied: sacremoses in /usr/local/lib/python3.6/dist-packages (from transformers) (0.0.43)\n",
+            "Requirement already satisfied: regex!=2019.12.17 in /usr/local/lib/python3.6/dist-packages (from transformers) (2019.12.20)\n",
+            "Requirement already satisfied: chardet<4,>=3.0.2 in /usr/local/lib/python3.6/dist-packages (from requests->transformers) (3.0.4)\n",
+            "Requirement already satisfied: urllib3!=1.25.0,!=1.25.1,<1.26,>=1.21.1 in /usr/local/lib/python3.6/dist-packages (from requests->transformers) (1.24.3)\n",
+            "Requirement already satisfied: idna<3,>=2.5 in /usr/local/lib/python3.6/dist-packages (from requests->transformers) (2.9)\n",
+            "Requirement already satisfied: certifi>=2017.4.17 in /usr/local/lib/python3.6/dist-packages (from requests->transformers) (2020.4.5.1)\n",
+            "Requirement already satisfied: six in /usr/local/lib/python3.6/dist-packages (from packaging->transformers) (1.12.0)\n",
+            "Requirement already satisfied: pyparsing>=2.0.2 in /usr/local/lib/python3.6/dist-packages (from packaging->transformers) (2.4.7)\n",
+            "Requirement already satisfied: joblib in /usr/local/lib/python3.6/dist-packages (from sacremoses->transformers) (0.15.1)\n",
+            "Requirement already satisfied: click in /usr/local/lib/python3.6/dist-packages (from sacremoses->transformers) (7.1.2)\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "1e6Qmgn6sYJ2",
+        "colab_type": "code",
+        "outputId": "8c3c7535-5430-4bf3-8175-8ca6924533bd",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 34
+        }
+      },
+      "source": [
+        "## Colab only cell to retrieve data\n",
+        "from google.colab import drive\n",
+        "drive.mount('/content/drive')"
+      ],
+      "execution_count": 31,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Drive already mounted at /content/drive; to attempt to forcibly remount, call drive.mount(\"/content/drive\", force_remount=True).\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "2Gq1Cfr_sbpi",
+        "colab_type": "code",
+        "outputId": "9d162ccd-1cf9-497b-f723-47b7dc50fde1",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 359
+        }
+      },
+      "source": [
+        "import pandas as pd\n",
+        "\n",
+        "# Replace with '' to not limit the dataset\n",
+        "dataset_limit = 250000\n",
+        "# Replace path with local path/drive path\n",
+        "# Note that the gmb dataset is parsed via unicode_escape, so you may want to change it\n",
+        "df = pd.read_csv(\"/content/drive/My Drive/Colab Notebooks/ner_dataset.csv\", encoding='unicode_escape').reset_index().ffill()[:int(dataset_limit)]\n",
+        "\n",
+        "df.head(10)"
+      ],
+      "execution_count": 32,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/html": [
+              "<div>\n",
+              "<style scoped>\n",
+              "    .dataframe tbody tr th:only-of-type {\n",
+              "        vertical-align: middle;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe tbody tr th {\n",
+              "        vertical-align: top;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe thead th {\n",
+              "        text-align: right;\n",
+              "    }\n",
+              "</style>\n",
+              "<table border=\"1\" class=\"dataframe\">\n",
+              "  <thead>\n",
+              "    <tr style=\"text-align: right;\">\n",
+              "      <th></th>\n",
+              "      <th>index</th>\n",
+              "      <th>Sentence #</th>\n",
+              "      <th>Word</th>\n",
+              "      <th>POS</th>\n",
+              "      <th>Tag</th>\n",
+              "    </tr>\n",
+              "  </thead>\n",
+              "  <tbody>\n",
+              "    <tr>\n",
+              "      <th>0</th>\n",
+              "      <td>0</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>Thousands</td>\n",
+              "      <td>NNS</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>1</th>\n",
+              "      <td>1</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>of</td>\n",
+              "      <td>IN</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>2</th>\n",
+              "      <td>2</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>demonstrators</td>\n",
+              "      <td>NNS</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>3</th>\n",
+              "      <td>3</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>have</td>\n",
+              "      <td>VBP</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>4</th>\n",
+              "      <td>4</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>marched</td>\n",
+              "      <td>VBN</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>5</th>\n",
+              "      <td>5</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>through</td>\n",
+              "      <td>IN</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>6</th>\n",
+              "      <td>6</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>London</td>\n",
+              "      <td>NNP</td>\n",
+              "      <td>B-geo</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>7</th>\n",
+              "      <td>7</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>to</td>\n",
+              "      <td>TO</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>8</th>\n",
+              "      <td>8</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>protest</td>\n",
+              "      <td>VB</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>9</th>\n",
+              "      <td>9</td>\n",
+              "      <td>Sentence: 1</td>\n",
+              "      <td>the</td>\n",
+              "      <td>DT</td>\n",
+              "      <td>O</td>\n",
+              "    </tr>\n",
+              "  </tbody>\n",
+              "</table>\n",
+              "</div>"
+            ],
+            "text/plain": [
+              "   index   Sentence #           Word  POS    Tag\n",
+              "0      0  Sentence: 1      Thousands  NNS      O\n",
+              "1      1  Sentence: 1             of   IN      O\n",
+              "2      2  Sentence: 1  demonstrators  NNS      O\n",
+              "3      3  Sentence: 1           have  VBP      O\n",
+              "4      4  Sentence: 1        marched  VBN      O\n",
+              "5      5  Sentence: 1        through   IN      O\n",
+              "6      6  Sentence: 1         London  NNP  B-geo\n",
+              "7      7  Sentence: 1             to   TO      O\n",
+              "8      8  Sentence: 1        protest   VB      O\n",
+              "9      9  Sentence: 1            the   DT      O"
+            ]
+          },
+          "metadata": {
+            "tags": []
+          },
+          "execution_count": 32
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "pZhoHhg9sgNY",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "## Code from: https://www.kaggle.com/akshay235/bert-implementation-on-ner-corpus/data\n",
+        "class SentenceGetter(object):\n",
+        "    \n",
+        "    def __init__(self, dataset):\n",
+        "        self.n_sent = 1\n",
+        "        self.dataset = dataset\n",
+        "        self.empty = False\n",
+        "        agg_func = lambda s: [(w,p, t) for w,p, t in zip(s[\"Word\"].values.tolist(),\n",
+        "                                                        s['POS'].values.tolist(),\n",
+        "                                                        s[\"Tag\"].values.tolist())]\n",
+        "        self.grouped = self.dataset.groupby(\"Sentence #\").apply(agg_func)\n",
+        "        self.sentences = [s for s in self.grouped]\n",
+        "    \n",
+        "    def get_next(self):\n",
+        "        try:\n",
+        "            s = self.grouped[\"Sentence: {}\".format(self.n_sent)]\n",
+        "            self.n_sent += 1\n",
+        "            return s\n",
+        "        except:\n",
+        "            return None"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "pE-XpyHNAQNV",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "getter = SentenceGetter(df)\n",
+        "sentences = [' '.join([s[0] for s in sent]) for sent in getter.sentences]\n",
+        "labels = [[s[2] for s in sent] for sent in getter.sentences]\n",
+        "\n",
+        "tag_vals = list(df[\"Tag\"].unique())\n",
+        "tag_index_ref = {t: i for i, t in enumerate(tag_vals)}"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "H2OrkOlgshxX",
+        "colab_type": "code",
+        "outputId": "f46b3d12-e331-4adf-b89e-07cb4b5f1de6",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 34
+        }
+      },
+      "source": [
+        "from transformers import BertTokenizer\n",
+        "\n",
+        "print('Loading BERT tokenizer...')\n",
+        "tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)"
+      ],
+      "execution_count": 35,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Loading BERT tokenizer...\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "OM4zdqvdsj0Z",
+        "colab_type": "code",
+        "outputId": "29e15b8d-729e-4473-9a10-8247cfc126be",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 88
+        }
+      },
+      "source": [
+        "# Print sentence\n",
+        "print(' Original: ', sentences[0])\n",
+        "\n",
+        "# Print tokenized sentence\n",
+        "print('Tokenized: ', tokenizer.tokenize(sentences[0]))\n",
+        "\n",
+        "# Print sentence converted to token ids\n",
+        "print('Token IDs: ', tokenizer.convert_tokens_to_ids(tokenizer.tokenize(sentences[0])))"
+      ],
+      "execution_count": 36,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            " Original:  Thousands of demonstrators have marched through London to protest the war in Iraq and demand the withdrawal of British troops from that country .\n",
+            "Tokenized:  ['thousands', 'of', 'demonstrators', 'have', 'marched', 'through', 'london', 'to', 'protest', 'the', 'war', 'in', 'iraq', 'and', 'demand', 'the', 'withdrawal', 'of', 'british', 'troops', 'from', 'that', 'country', '.']\n",
+            "Token IDs:  [5190, 1997, 28337, 2031, 9847, 2083, 2414, 2000, 6186, 1996, 2162, 1999, 5712, 1998, 5157, 1996, 10534, 1997, 2329, 3629, 2013, 2008, 2406, 1012]\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "BOJaefQ1slzn",
+        "colab_type": "code",
+        "outputId": "0ddf7e7e-cec0-4d6d-b100-350d9bdc348b",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 34
+        }
+      },
+      "source": [
+        "def tokenize_sent(sent):\n",
+        "  # Tokenize text and add [CLS]/[SEP] tokens\n",
+        "  return tokenizer.encode(sent, add_special_tokens=True)\n",
+        "\n",
+        "tokenized = list(map(tokenize_sent, sentences))\n",
+        "max_len = len(max(tokenized, key=len))\n",
+        "\n",
+        "print('Max sentence length: ', max_len)"
+      ],
+      "execution_count": 37,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "Max sentence length:  79\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "4aAAM77EsoMJ",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "import torch\n",
+        "from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler\n",
+        "from keras.preprocessing.sequence import pad_sequences\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "from transformers import BertTokenizer, BertConfig, BertForTokenClassification, AdamW"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "aGXswAnhsp0u",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "batch_size = 64"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "J9rJClLMCcJ5",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "tokenized_texts = [tokenizer.tokenize(sent) for sent in sentences]\n",
+        "input_ids = pad_sequences([tokenizer.convert_tokens_to_ids(text) for text in tokenized_texts],\n",
+        "                          maxlen=max_len, dtype=\"long\", truncating=\"post\", padding=\"post\")\n",
+        "\n",
+        "tags = pad_sequences([[tag_index_ref.get(l) for l in lab] for lab in labels],\n",
+        "                     maxlen=max_len, value=tag_index_ref[\"O\"], padding=\"post\",\n",
+        "                     dtype=\"long\", truncating=\"post\")\n",
+        "\n",
+        "attention_masks = [[float(i>0) for i in ids] for ids in input_ids]"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "28GunTXPstjH",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "tr_inputs, val_inputs, tr_tags, val_tags = train_test_split(input_ids, tags, random_state=2018, test_size=0.1)\n",
+        "tr_masks, val_masks, _, _ = train_test_split(attention_masks, input_ids, random_state=2018, test_size=0.1)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "TMB_eNT-sva_",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "tr_inputs = torch.tensor(tr_inputs)\n",
+        "val_inputs = torch.tensor(val_inputs)\n",
+        "\n",
+        "tr_tags = torch.tensor(tr_tags)\n",
+        "val_tags = torch.tensor(val_tags)\n",
+        "\n",
+        "tr_masks = torch.tensor(tr_masks)\n",
+        "val_masks = torch.tensor(val_masks)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "1cjbmnH7sxoB",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "train_data = TensorDataset(tr_inputs, tr_masks, tr_tags)\n",
+        "train_dataloader = DataLoader(train_data, sampler=RandomSampler(train_data), batch_size=batch_size)\n",
+        "\n",
+        "valid_data = TensorDataset(val_inputs, val_masks, val_tags)\n",
+        "valid_dataloader = DataLoader(valid_data, sampler=SequentialSampler(valid_data), batch_size=batch_size)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "ZBMGlOmHs0qn",
+        "colab_type": "code",
+        "outputId": "b01774c5-b4c5-4bb9-a82f-d46cc06c4db3",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 1000
+        }
+      },
+      "source": [
+        "model = BertForTokenClassification.from_pretrained(\"bert-base-uncased\", num_labels=len(tag_index_ref))\n",
+        "model.cuda()"
+      ],
+      "execution_count": 44,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "BertForTokenClassification(\n",
+              "  (bert): BertModel(\n",
+              "    (embeddings): BertEmbeddings(\n",
+              "      (word_embeddings): Embedding(30522, 768, padding_idx=0)\n",
+              "      (position_embeddings): Embedding(512, 768)\n",
+              "      (token_type_embeddings): Embedding(2, 768)\n",
+              "      (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "      (dropout): Dropout(p=0.1, inplace=False)\n",
+              "    )\n",
+              "    (encoder): BertEncoder(\n",
+              "      (layer): ModuleList(\n",
+              "        (0): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (1): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (2): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (3): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (4): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (5): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (6): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (7): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (8): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (9): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (10): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "        (11): BertLayer(\n",
+              "          (attention): BertAttention(\n",
+              "            (self): BertSelfAttention(\n",
+              "              (query): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (key): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (value): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "            (output): BertSelfOutput(\n",
+              "              (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "              (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "              (dropout): Dropout(p=0.1, inplace=False)\n",
+              "            )\n",
+              "          )\n",
+              "          (intermediate): BertIntermediate(\n",
+              "            (dense): Linear(in_features=768, out_features=3072, bias=True)\n",
+              "          )\n",
+              "          (output): BertOutput(\n",
+              "            (dense): Linear(in_features=3072, out_features=768, bias=True)\n",
+              "            (LayerNorm): LayerNorm((768,), eps=1e-12, elementwise_affine=True)\n",
+              "            (dropout): Dropout(p=0.1, inplace=False)\n",
+              "          )\n",
+              "        )\n",
+              "      )\n",
+              "    )\n",
+              "    (pooler): BertPooler(\n",
+              "      (dense): Linear(in_features=768, out_features=768, bias=True)\n",
+              "      (activation): Tanh()\n",
+              "    )\n",
+              "  )\n",
+              "  (dropout): Dropout(p=0.1, inplace=False)\n",
+              "  (classifier): Linear(in_features=768, out_features=17, bias=True)\n",
+              ")"
+            ]
+          },
+          "metadata": {
+            "tags": []
+          },
+          "execution_count": 44
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "71UK6IUgs185",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "optimizer = AdamW(model.parameters(), lr = 2e-5, eps = 1e-8)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "ZeH2aI1iDJ6s",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "from transformers import get_linear_schedule_with_warmup\n",
+        "\n",
+        "# Number of training epochs. The BERT authors recommend between 2 and 4. \n",
+        "epochs = 4\n",
+        "\n",
+        "total_steps = len(train_dataloader) * epochs\n",
+        "scheduler = get_linear_schedule_with_warmup(optimizer, \n",
+        "                                            num_warmup_steps = 0, \n",
+        "                                            num_training_steps = total_steps)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "YkOeVMQys3wf",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "import numpy as np\n",
+        "\n",
+        "# Calculate accuracy of predictions with labels\n",
+        "def flat_accuracy(preds, labels):\n",
+        "    pred_flat = np.argmax(preds, axis=2).flatten()\n",
+        "    labels_flat = labels.flatten()\n",
+        "    return np.sum(pred_flat == labels_flat) / len(labels_flat)"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "EYjOrpeAs43n",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        "import time\n",
+        "import datetime\n",
+        "\n",
+        "def format_time(elapsed):\n",
+        "    # Round to the nearest second.\n",
+        "    elapsed_rounded = int(round((elapsed)))\n",
+        "    # Format as hh:mm:ss\n",
+        "    return str(datetime.timedelta(seconds=elapsed_rounded))"
+      ],
+      "execution_count": 0,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "isiyrETPs8l5",
+        "colab_type": "code",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 782
+        },
+        "outputId": "92c857d6-dff8-45ea-edd8-4439651f6728"
+      },
+      "source": [
+        "import random\n",
+        "\n",
+        "# Code derived from: https://mccormickml.com/2019/07/22/BERT-fine-tuning/#2-loading-cola-dataset\n",
+        "# Set to constant to reproduce training\n",
+        "seed_val = 42\n",
+        "\n",
+        "random.seed(seed_val)\n",
+        "np.random.seed(seed_val)\n",
+        "torch.manual_seed(seed_val)\n",
+        "torch.cuda.manual_seed_all(seed_val)\n",
+        "\n",
+        "training_stats = []\n",
+        "total_t0 = time.time()\n",
+        "\n",
+        "for epoch_i in range(epochs):\n",
+        "    \n",
+        "    # ============ Training =================\n",
+        "\n",
+        "    print('\\n====== Epoch {:} / {:} ======'.format(epoch_i + 1, epochs))\n",
+        "    print('Training...')\n",
+        "\n",
+        "    t0 = time.time()\n",
+        "    total_train_loss = 0\n",
+        "    # Put the model into training mode\n",
+        "    model.train()\n",
+        "\n",
+        "    for step, batch in enumerate(train_dataloader):\n",
+        "\n",
+        "        if step % 40 == 0 and not step == 0:\n",
+        "            # Calculate elapsed time in minutes.\n",
+        "            elapsed = format_time(time.time() - t0)\n",
+        "            print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_dataloader), elapsed))\n",
+        "\n",
+        "\n",
+        "        # Unpack training batch from dataloader. \n",
+        "        #   [0] input ids\n",
+        "        #   [1] attention masks\n",
+        "        #   [2] labels\n",
+        "        b_input_ids, b_input_mask, b_labels = tuple(t.to(device) for t in batch)\n",
+        "\n",
+        "        # Clear gradient\n",
+        "        model.zero_grad()\n",
+        "        # Forward pass        \n",
+        "        loss, logits = model(\n",
+        "                             b_input_ids, \n",
+        "                             token_type_ids=None, \n",
+        "                             attention_mask=b_input_mask, \n",
+        "                             labels=b_labels,\n",
+        "                            )\n",
+        "\n",
+        "\n",
+        "        total_train_loss += loss.item()\n",
+        "        # Backward pass to calculate gradients\n",
+        "        loss.backward()\n",
+        "\n",
+        "        # Clip norm of gradients to prevent exploding gradients\n",
+        "        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)\n",
+        "\n",
+        "        optimizer.step()\n",
+        "        scheduler.step()\n",
+        "\n",
+        "    avg_train_loss = total_train_loss / len(train_dataloader)            \n",
+        "    training_time = format_time(time.time() - t0)\n",
+        "\n",
+        "    print(\"\\nAverage training loss: {0:.2f}\".format(avg_train_loss))\n",
+        "    print(\"Training epcoh took: {:}\".format(training_time))\n",
+        "        \n",
+        "    # ============ Validation =================\n",
+        "\n",
+        "    print(\"\\nRunning Validation...\")\n",
+        "\n",
+        "    t0 = time.time()\n",
+        "\n",
+        "    # Set model to eval mode\n",
+        "    model.eval()\n",
+        "\n",
+        "    total_eval_accuracy = 0\n",
+        "    total_eval_loss = 0\n",
+        "    nb_eval_steps = 0\n",
+        "\n",
+        "    for batch in valid_dataloader:\n",
+        "        \n",
+        "        # Unpack training batch from dataloader. \n",
+        "        #   [0] input ids\n",
+        "        #   [1] attention masks\n",
+        "        #   [2] labels\n",
+        "        b_input_ids, b_input_mask, b_labels = tuple(t.to(device) for t in batch)\n",
+        "        \n",
+        "        # No need to update gradients (not in testing)\n",
+        "        with torch.no_grad():        \n",
+        "\n",
+        "            (loss, logits) = model(\n",
+        "                                   b_input_ids, \n",
+        "                                   token_type_ids=None, \n",
+        "                                   attention_mask=b_input_mask,\n",
+        "                                   labels=b_labels,\n",
+        "                                  )\n",
+        "            \n",
+        "        total_eval_loss += loss.item()\n",
+        "\n",
+        "        # Move logits and labels to CPU\n",
+        "        logits = logits.detach().cpu().numpy()\n",
+        "        label_ids = b_labels.to('cpu').numpy()\n",
+        "\n",
+        "        total_eval_accuracy += flat_accuracy(logits, label_ids)\n",
+        "        \n",
+        "\n",
+        "    avg_val_accuracy = total_eval_accuracy / len(valid_dataloader)\n",
+        "    print(\"Accuracy: {0:.2f}\".format(avg_val_accuracy))\n",
+        "\n",
+        "    avg_val_loss = total_eval_loss / len(valid_dataloader)\n",
+        "    \n",
+        "\n",
+        "    validation_time = format_time(time.time() - t0)\n",
+        "    print(\"Validation Loss: {0:.2f}\".format(avg_val_loss))\n",
+        "    print(\"Validation took: {:}\".format(validation_time))\n",
+        "\n",
+        "    # Record all statistics from this epoch.\n",
+        "    training_stats.append(\n",
+        "        {\n",
+        "            'epoch': epoch_i + 1,\n",
+        "            'Training Loss': avg_train_loss,\n",
+        "            'Valid. Loss': avg_val_loss,\n",
+        "            'Valid. Accur.': avg_val_accuracy,\n",
+        "            'Training Time': training_time,\n",
+        "            'Validation Time': validation_time\n",
+        "        }\n",
+        "    )\n",
+        "\n",
+        "print(\"Total training took {:} (h:mm:ss)\".format(format_time(time.time()-total_t0)))"
+      ],
+      "execution_count": 49,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "text": [
+            "\n",
+            "====== Epoch 1 / 4 ======\n",
+            "Training...\n",
+            "\n",
+            "Average training loss: 0.57\n",
+            "Training epcoh took: 0:03:55\n",
+            "\n",
+            "Running Validation...\n",
+            "Accuracy: 0.90\n",
+            "Validation Loss: 0.38\n",
+            "Validation took: 0:00:10\n",
+            "\n",
+            "====== Epoch 2 / 4 ======\n",
+            "Training...\n",
+            "\n",
+            "Average training loss: 0.35\n",
+            "Training epcoh took: 0:03:55\n",
+            "\n",
+            "Running Validation...\n",
+            "Accuracy: 0.91\n",
+            "Validation Loss: 0.31\n",
+            "Validation took: 0:00:10\n",
+            "\n",
+            "====== Epoch 3 / 4 ======\n",
+            "Training...\n",
+            "\n",
+            "Average training loss: 0.29\n",
+            "Training epcoh took: 0:03:56\n",
+            "\n",
+            "Running Validation...\n",
+            "Accuracy: 0.91\n",
+            "Validation Loss: 0.28\n",
+            "Validation took: 0:00:10\n",
+            "\n",
+            "====== Epoch 4 / 4 ======\n",
+            "Training...\n",
+            "\n",
+            "Average training loss: 0.27\n",
+            "Training epcoh took: 0:03:56\n",
+            "\n",
+            "Running Validation...\n",
+            "Accuracy: 0.91\n",
+            "Validation Loss: 0.27\n",
+            "Validation took: 0:00:10\n",
+            "Total training took 0:16:20 (h:mm:ss)\n"
+          ],
+          "name": "stdout"
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "gdAzeaAVtK6A",
+        "colab_type": "code",
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 204
+        },
+        "outputId": "2b1701e1-abca-4b5e-9750-67d849c0441c"
+      },
+      "source": [
+        "import pandas as pd\n",
+        "\n",
+        "pd.set_option('precision', 2)\n",
+        "df_stats = pd.DataFrame(data=training_stats)\n",
+        "df_stats = df_stats.set_index('epoch')\n",
+        "\n",
+        "df_stats"
+      ],
+      "execution_count": 50,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/html": [
+              "<div>\n",
+              "<style scoped>\n",
+              "    .dataframe tbody tr th:only-of-type {\n",
+              "        vertical-align: middle;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe tbody tr th {\n",
+              "        vertical-align: top;\n",
+              "    }\n",
+              "\n",
+              "    .dataframe thead th {\n",
+              "        text-align: right;\n",
+              "    }\n",
+              "</style>\n",
+              "<table border=\"1\" class=\"dataframe\">\n",
+              "  <thead>\n",
+              "    <tr style=\"text-align: right;\">\n",
+              "      <th></th>\n",
+              "      <th>Training Loss</th>\n",
+              "      <th>Valid. Loss</th>\n",
+              "      <th>Valid. Accur.</th>\n",
+              "      <th>Training Time</th>\n",
+              "      <th>Validation Time</th>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>epoch</th>\n",
+              "      <th></th>\n",
+              "      <th></th>\n",
+              "      <th></th>\n",
+              "      <th></th>\n",
+              "      <th></th>\n",
+              "    </tr>\n",
+              "  </thead>\n",
+              "  <tbody>\n",
+              "    <tr>\n",
+              "      <th>1</th>\n",
+              "      <td>0.57</td>\n",
+              "      <td>0.38</td>\n",
+              "      <td>0.90</td>\n",
+              "      <td>0:03:55</td>\n",
+              "      <td>0:00:10</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>2</th>\n",
+              "      <td>0.35</td>\n",
+              "      <td>0.31</td>\n",
+              "      <td>0.91</td>\n",
+              "      <td>0:03:55</td>\n",
+              "      <td>0:00:10</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>3</th>\n",
+              "      <td>0.29</td>\n",
+              "      <td>0.28</td>\n",
+              "      <td>0.91</td>\n",
+              "      <td>0:03:56</td>\n",
+              "      <td>0:00:10</td>\n",
+              "    </tr>\n",
+              "    <tr>\n",
+              "      <th>4</th>\n",
+              "      <td>0.27</td>\n",
+              "      <td>0.27</td>\n",
+              "      <td>0.91</td>\n",
+              "      <td>0:03:56</td>\n",
+              "      <td>0:00:10</td>\n",
+              "    </tr>\n",
+              "  </tbody>\n",
+              "</table>\n",
+              "</div>"
+            ],
+            "text/plain": [
+              "       Training Loss  Valid. Loss  Valid. Accur. Training Time Validation Time\n",
+              "epoch                                                                         \n",
+              "1               0.57         0.38           0.90       0:03:55         0:00:10\n",
+              "2               0.35         0.31           0.91       0:03:55         0:00:10\n",
+              "3               0.29         0.28           0.91       0:03:56         0:00:10\n",
+              "4               0.27         0.27           0.91       0:03:56         0:00:10"
+            ]
+          },
+          "metadata": {
+            "tags": []
+          },
+          "execution_count": 50
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "metadata": {
+        "id": "otg-ylBuBlzG",
+        "colab_type": "code",
+        "colab": {}
+      },
+      "source": [
+        ""
+      ],
+      "execution_count": 0,
+      "outputs": []
+    }
+  ]
+}
